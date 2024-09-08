@@ -1,12 +1,11 @@
-_unit       = param[0];
-_distance   = param[1, 4500];
-_tgtLogic 	= param[2, 1];
+private _unit       = param[0];
+private _distance   = param[1, 7200];
+private _tgtLogic 	= param[2, 1];
 //Speed, guidance, N, ignore direct, time to max, delay between shots
-_weaponPar	= param[3, [420/3.6, 0, 4, false, 14, 1]];
-_typeArray 	= param[4, ["ShellBase","RocketBase","MissileBase","SubmunitionBase"]];
-_ignored	= param[5, ["MissileBase"]];
+private _weaponPar	= param[3, [420/3.6, 0, 4, false, 14, 0.75]];
+private _typeArray 	= param[4, ["ShellBase","SubmunitionBase"]];
 
-
+if(is3DEN) exitWith {};
 
 //Stops previous dome script, starts new one
 _unit setVariable ["DomeInit", false, true];
@@ -14,21 +13,30 @@ waitUntil {(_unit getVariable ["DomeRunning", false]) == false};
 _unit setVariable ["DomeInit", true, true];
 
 //Save values
-_unit setVariable ["WeaponsPar", _weaponPar];
-_unit setVariable ["DomeRunning", true];
+_unit setVariable ["WeaponsPar", _weaponPar, true];
+_unit setVariable ["DomeRunning", true, true];
 
 if(!isServer) exitWith {};
 
+_n = [0, 9] call BIS_fnc_randomInt;
+sleep (0.1 * _n);
+
 //Chase camera behind the missile 
 allowAttach = false;
+
 //Handle the missile
 _unit addEventHandler ["Fired", {
 	params ["_unit", "_weapon", "_muzzle", "_mode", "_ammo", "_magazine", "_projectile", "_gunner"];
-	_target = _unit getVariable ["currentTarget", objNull];
-	if(isNull _target) exitWith {};
+	private _target = _unit getVariable ["currentTarget", objNull];
+	private _parameters = _unit getVariable "WeaponsPar";
 
-	_parameters = _unit getVariable "WeaponsPar";
-	[_projectile, _target, _parameters] spawn IRON_DOME37_fnc_guidanceLaws;
+	if(!isNull _target) then {
+		[_projectile, _parameters, _target] spawn IRON_DOME37_fnc_handleMissile;
+		_unit setVariable ["currentTarget", objNull];
+	};
+	
+
+	//Attach a camera to themissile, made for the video
 	if(allowAttach) then {
 			_projectile spawn {
 			allowAttach = false;
@@ -49,7 +57,7 @@ _unit addEventHandler ["Fired", {
 }];
 
 //_unit setVehicleRadar 1;
-_unit setVariable ["alarmEnabled", false];
+_unit setVariable ["alarmEnabled", true];
 //Toggle incoming alarm
 _unit addAction ["Toggle alarm", {
 	params ["_target", "_caller", "_actionId", "_arguments"];
@@ -96,55 +104,94 @@ _unit addAction ["Change targeting mode", {
 	_id = owner _caller;
 	["Logic changed to: " + _out] remoteExec ["hint", _id];
 
-	_target setVariable	["_tgtLogic", _tgtLogic];
+	_target setVariable	["_tgtLogic", _tgtLogic, true];
 }, nil, 10, false, false, "", "!(_this in _target)", 10];
 
-//Makes it better 
-{
-	_x setSkill 1;
-}foreach crew _unit;
-
 //Performance optimizations
-_emptyLoops = 0;
-_delay = 0.5;
+private _emptyLoops = 0;
+private _delay = 0.5;
 
 //If the launcher has to be pointed
-_needsAiming 	= _weaponPar select 3;
-_shotsDelay		= _weaponPar select 5;
+private _needsAiming 	= _weaponPar select 3;
+private _shotsDelay		= _weaponPar select 5;
 
+/*
 //Main loop
 _loops = ((count _typeArray) - 1);
+*/
 
 //If a new dome is initialized
-_isActive = true;
-_timeActive = time;
+private _isActive = true;
+private _timeActive = time;
 
+private _entities = [];
+private _targetedShells = [];
+private _ignored = [];
+
+//PREFETCH THE ALARMS TO SAVE PERFORMANCE
+private _alarms = _unit nearObjects ["NonStrategic", 1000];
+_alarms = _alarms select {typeOf _x == "Land_Loudspeakers_F"};
+
+//SOME DELAY SO THE MISSILES DONT FIRE AT ONCE
+sleep(random(1));
+
+//MAIN LOOP
 while {alive _unit and (someAmmo _unit) and _isActive} do {
 	if(time - _timeActive > 5) then {
 		_isActive = _unit getVariable ["DomeInit",true];
 		_timeActive = time;
+
+		//Purge dead shells in _ignored
+		_ignored = _ignored select {alive _x and !unitIsUAV _x};
 	};
 
 	_tgtLogic = _unit getVariable ["_tgtLogic", 0];
-	_entities = [];
-	_targetedShells = [];
-	_target = objNull;
+	private _entities = [];
+	private _targetedShells = [];
+	private _target = objNull;
 
-	//Detection script
-	isNil {
-		_targetedShells = missionNamespace getVariable ["_targetedShells", []];
-		for "_i" from 0 to _loops do {
-			_near = _unit nearObjects [_typeArray select _i, _distance];
-			_entities append _near;
-		};
+	//Optimized detection, shells are now initialized on creation
+	_entities = missionNamespace getVariable ["_initializedShells", []];
+	_targetedShells = missionNamespace getVariable ["_targetedShells", []];
 
-		//Initialized shells
-		_entities = _entities select {!(_x isKindOf "MissileBase") or (_x isKindOf "ammo_Missile_CruiseBase")};
-		_entities = (_entities select {!(_x in _targetedShells)});
+	//Only consider the close ones
+	_entities = _entities select {_x distance2D _unit < _distance};
+	
+	//Disregard already targetted
+	_entities = _entities select {!(_x in _targetedShells)};
 
-		//Pick a target
+	//Disregard already targetted
+	_entities = _entities select {!(_x in _ignored)};
+
+
+	//Pick a target
+	if(count _entities > 0) then {
+		//IMPROVED LOGIC TO STOP OUTGOING TARGETS
+		{
+			if(unitIsUAV _x) then {
+				private _side = side _x;
+				private _alt = (getPosATL _x) select 2;
+				if(_side == side _unit or _alt < 4) then {
+					_ignored pushBack _x;
+					private _id = (_entities find _x);
+					if(_id != -1) then {
+						_entities deleteAt _id;
+					};
+				};
+			} else {
+				private _vVer = (velocity _x) select 2;
+				private _dist = _x distance2D _unit;
+				if(_vVer > 50 and _dist < 300) then {
+					_ignored pushBack _x;
+					private _id = (_entities find _x);
+					if(_id != -1) then {
+						_entities deleteAt _id;
+					};
+				}; 
+			};
+		}forEach _entities;
+
 		if(count _entities > 0) then {
-			[_entities] call IRON_DOME37_fnc_initshells;
 			_target = [_entities, _unit, _tgtLogic] call IRON_DOME37_fnc_pickTarget;
 
 			if(!isNull _target) then {
@@ -155,17 +202,24 @@ while {alive _unit and (someAmmo _unit) and _isActive} do {
 
 	if(!isNull _target) then {
 		_emptyLoops = 0;
-		_delay = 0.5;
-		//Init all the entities
-		
-		//Different targets require different initial conditions for the missile
-		//Originally used to check minimum angle, unused
-		/*
-			_aslDiff = ((_pos select 2) - ((getPosASL _unit) select 2));
-			_angleToTgt = atan(_aslDiff/(_unit distance2d _target)); //y / x 
-			_angleToTgt = (_angleToTgt - 0.1) max 0;
-			_angleToTgt = _angleToTgt/90;
-		*/
+		_delay = 0.1 + _shotsDelay;
+
+		//ALARM
+		if(_unit getVariable ["alarmEnabled",false]) then {
+			if (!(_unit getVariable ["alarmplaying",false])) then {
+				_unit setVariable ["alarmplaying",true,true];
+
+				{
+					_x say3D ["CRAMALARM", 800 ,1,false,0];
+				}forEach _alarms;
+
+				_unit say3D ["CRAMALARM",1500,1,false,0];
+				_unit spawn {
+					sleep 90;
+					_this setVariable ["alarmplaying",false,true];
+				};
+			};
+		};
 		
 		//Engagement logic
 		_time = time;
@@ -186,14 +240,17 @@ while {alive _unit and (someAmmo _unit) and _isActive} do {
 			sleep 1;
 		};
 			
-		if(!alive _target) exitWith {};
+		if(!alive _target or isNull _target) then {["_targetedShells", _target, "remove"] call IRON_DOME37_fnc_handleTargets; continue;};
 
 		//If this was aimed upward continue, else abort
 		if((((_unit weaponDirection _wep) select 2) > 0.1) or !_needsAiming) then {
-			isNil{_unit setVariable ["currentTarget", _target];};
-
 			//event handler takes care of the missile
-			_unit fire _wep;
+			if(!isNull _target) then {
+				_unit setVariable ["currentTarget", _target, true];
+				//_unit fire _wep;
+				[_unit, _wep] remoteExec ["Fire", owner _unit];
+				sleep(0.1);
+			};
 
 			//Safety cleanup 
 			_target spawn {
@@ -211,13 +268,7 @@ while {alive _unit and (someAmmo _unit) and _isActive} do {
 			};
 		};
 	} else {
-		//Lowers the amount of checks per second when nothing is found
-		_delay = 1;
-		_emptyLoops = (_emptyLoops + 1);
-		if(_emptyLoops > 30) then {
-			_delay = 1.5;
-			_unit doWatch objNull;
-		};
+		_delay = 0.25;
 	};
 	sleep _delay;
 };

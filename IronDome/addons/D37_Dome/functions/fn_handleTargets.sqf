@@ -3,6 +3,7 @@ _item 		= param[1];
 _action 	= param[2];
 
 _array = missionNamespace getVariable [_arrayName, []];
+
 switch (_action) do {
 	case "add": {
 		_array pushback _item;
@@ -16,5 +17,5 @@ switch (_action) do {
 	default {};
 };
 
-missionNamespace setVariable [_arrayName, _array];
+missionNamespace setVariable [_arrayName, _array, true];
 true;
