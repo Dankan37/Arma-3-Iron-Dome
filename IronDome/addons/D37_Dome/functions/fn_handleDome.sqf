@@ -2,7 +2,7 @@ private _unit       = param[0];
 private _distance   = param[1, 7200];
 private _tgtLogic 	= param[2, 1];
 //Speed, guidance, N, ignore direct, time to max, delay between shots
-private _weaponPar	= param[3, [420/3.6, 0, 4, false, 14, 0.75]];
+private _weaponPar	= param[3, [420/3.6, 0, 4, false, 14, 0.85]];
 private _typeArray 	= param[4, ["ShellBase","SubmunitionBase"]];
 
 if(is3DEN) exitWith {};
@@ -32,7 +32,7 @@ _unit addEventHandler ["Fired", {
 
 	if(!isNull _target) then {
 		[_projectile, _parameters, _target] spawn IRON_DOME37_fnc_handleMissile;
-		_unit setVariable ["currentTarget", objNull];
+		_unit setVariable ["currentTarget", objNull, true];
 	};
 	
 
@@ -57,12 +57,12 @@ _unit addEventHandler ["Fired", {
 }];
 
 //_unit setVehicleRadar 1;
-_unit setVariable ["alarmEnabled", true];
+_unit setVariable ["alarmEnabled", true, true];
 //Toggle incoming alarm
 _unit addAction ["Toggle alarm", {
 	params ["_target", "_caller", "_actionId", "_arguments"];
 	_state = !(_target getVariable ["alarmEnabled", true]);
-	_target setVariable ["alarmEnabled", _state];
+	_target setVariable ["alarmEnabled", _state, true];
 
 	_out = "";
 	if(_state) then {
@@ -77,7 +77,7 @@ _unit addAction ["Toggle alarm", {
 }, nil, 9, false, false, "", "!(_this in _target)", 10];
 
 //Change logic
-_unit setVariable ["_tgtLogic", _tgtLogic];
+_unit setVariable ["_tgtLogic", _tgtLogic, true];
 _unit addAction ["Change targeting mode", {
 	params ["_target", "_caller", "_actionId", "_arguments"];
 	_tgtLogic = _target getVariable ["_tgtLogic", 0];
@@ -123,13 +123,14 @@ _loops = ((count _typeArray) - 1);
 //If a new dome is initialized
 private _isActive = true;
 private _timeActive = time;
+private _sideDome = side _unit;
 
 private _entities = [];
 private _targetedShells = [];
 private _ignored = [];
 
 //PREFETCH THE ALARMS TO SAVE PERFORMANCE
-private _alarms = _unit nearObjects ["NonStrategic", 1000];
+private _alarms = _unit nearObjects ["NonStrategic", 1300];
 _alarms = _alarms select {typeOf _x == "Land_Loudspeakers_F"};
 
 //SOME DELAY SO THE MISSILES DONT FIRE AT ONCE
@@ -142,7 +143,7 @@ while {alive _unit and (someAmmo _unit) and _isActive} do {
 		_timeActive = time;
 
 		//Purge dead shells in _ignored
-		_ignored = _ignored select {alive _x and !unitIsUAV _x};
+		_ignored = _ignored select {alive _x and !unitIsUAV _x or isNull _x};
 	};
 
 	_tgtLogic = _unit getVariable ["_tgtLogic", 0];
@@ -156,6 +157,9 @@ while {alive _unit and (someAmmo _unit) and _isActive} do {
 
 	//Only consider the close ones
 	_entities = _entities select {_x distance2D _unit < _distance};
+
+	//Disregard same side (see https://community.bistudio.com/wiki/Arma_3:_Mission_Event_Handlers#ArtilleryShellFired)
+	_entities = _entities select {[(_x getVariable ["_shellSide", sideEnemy]), _sideDome] call BIS_fnc_sideIsEnemy};
 	
 	//Disregard already targetted
 	_entities = _entities select {!(_x in _targetedShells)};
@@ -163,15 +167,14 @@ while {alive _unit and (someAmmo _unit) and _isActive} do {
 	//Disregard already targetted
 	_entities = _entities select {!(_x in _ignored)};
 
-
 	//Pick a target
 	if(count _entities > 0) then {
 		//IMPROVED LOGIC TO STOP OUTGOING TARGETS
 		{
-			if(unitIsUAV _x) then {
+			if(unitIsUAV _x and (count (crew _x) > 0)) then {
 				private _side = side _x;
 				private _alt = (getPosATL _x) select 2;
-				if(_side == side _unit or _alt < 4) then {
+				if(_side == side _unit or _alt < 5 or isTouchingGround _x) then {
 					_ignored pushBack _x;
 					private _id = (_entities find _x);
 					if(_id != -1) then {
@@ -196,6 +199,11 @@ while {alive _unit and (someAmmo _unit) and _isActive} do {
 
 			if(!isNull _target) then {
 				["_targetedShells", _target, "add"] call IRON_DOME37_fnc_handleTargets;
+
+				//Take over unit targetting
+				{
+					[_x, "AUTOTARGET"] remoteExec ["disableAI", owner _x];
+				}forEach crew _unit;
 			};
 		};
 	};
@@ -210,10 +218,12 @@ while {alive _unit and (someAmmo _unit) and _isActive} do {
 				_unit setVariable ["alarmplaying",true,true];
 
 				{
-					_x say3D ["CRAMALARM", 800 ,1,false,0];
+					//_x say3D ["CRAMALARM", 800 ,1,false,0];
+					playSound3D ["D37_Dome\Sound\CRAM_ALARM.ogg", _x, false, (getposASL _x), 1, 1, 800, 0, false];
 				}forEach _alarms;
 
-				_unit say3D ["CRAMALARM",1500,1,false,0];
+				//_unit say3D ["CRAMALARM",1500,1,false,0];
+				playSound3D ["D37_Dome\Sound\CRAM_ALARM.ogg", _unit, false, (getposASL _unit), 2, 1, 1200, 0, false];
 				_unit spawn {
 					sleep 90;
 					_this setVariable ["alarmplaying",false,true];
@@ -222,25 +232,31 @@ while {alive _unit and (someAmmo _unit) and _isActive} do {
 		};
 		
 		//Engagement logic
-		_time = time;
 		_wep =  currentWeapon _unit;
 
 		//Must aim
 		if(_needsAiming) then {
 			//Makes the launcher point upward
-			_pos = (getPosASL _target);
+			private _pos = (getPosASL _target);
 			_increment = 3500;
+
+			//AIM above horizon 22 degrees
 			if(_target isKindOf "ammo_Missile_CruiseBase") then {
-				_increment = 0;
+				_increment = (_unit distance2D _target) * tan(22);
 			};
+
 			_pos set [2, (_pos select 2) + _increment ];
 			_unit doWatch _pos;
 
-			waitUntil {([_unit, _pos] call IRON_DOME37_fnc_watchQuality > 0.8) or (time - _time) > 7};
+			private _time = time;
+			waitUntil {([_unit, _pos] call IRON_DOME37_fnc_watchQuality > 0.80) or (time - _time) > 6};
 			sleep 1;
 		};
 			
-		if(!alive _target or isNull _target) then {["_targetedShells", _target, "remove"] call IRON_DOME37_fnc_handleTargets; continue;};
+		if(!alive _target or isNull _target) then {
+			["_targetedShells", _target, "remove"] call IRON_DOME37_fnc_handleTargets; 
+			continue;
+		};
 
 		//If this was aimed upward continue, else abort
 		if((((_unit weaponDirection _wep) select 2) > 0.1) or !_needsAiming) then {
@@ -250,11 +266,16 @@ while {alive _unit and (someAmmo _unit) and _isActive} do {
 				//_unit fire _wep;
 				[_unit, _wep] remoteExec ["Fire", owner _unit];
 				sleep(0.1);
+
+				//enable unit targetting
+				{
+					[_x, "AUTOTARGET"] remoteExec ["enableAI", owner _x];
+				}forEach crew _unit;
 			};
 
 			//Safety cleanup 
 			_target spawn {
-				sleep 25;
+				sleep 30;
 				if(alive _this) then {
 					["_targetedShells", _this, "remove"] call IRON_DOME37_fnc_handleTargets;
 				};
@@ -276,4 +297,4 @@ while {alive _unit and (someAmmo _unit) and _isActive} do {
 _unit doWatch objNull;
 removeallActions _unit;
 
-_unit setVariable ["DomeRunning", false];
+_unit setVariable ["DomeRunning", false, true];

@@ -3,20 +3,13 @@ if(!isServer) exitWith {};
 //Optimized version of the shells initialization script 
 private _shell = param[0];
 
-//Preventive bullet skip
-if(_shell isKindOf "BulletCore" or {_shell isKindOf "Grenade"}) exitWith {};
-
 //Sometimes explosions pop here idk
 if(isNull _shell) exitWith {};
-
-//prevents missile and mines
-if(_shell isKindOf "MissileCore" or _shell isKindOf "TimeBombCore") exitWith {};
 
 //Currently initatizated shells
 private _initializedShells = missionNamespace getVariable ["_initializedShells", []];
 
-//Prevents double init, the EH only runs once
-//if(_x in _initializedShells) exitWith {};
+_shell setVariable ["isMissile", true, true];
 
 _shell spawn {
 	private _shell = _this;
@@ -26,18 +19,11 @@ _shell spawn {
 	//Some things that explode immediatly don't endup cluttering the script later
 	if(!alive _shell or isNull _shell) exitWith {};
 
-	//private _isCruiseMissile = _x isKindOf "ammo_Missile_CruiseBase";
-	
 	//Detection loop
 	while {alive _shell} do {
 		private _entities = _shell nearObjects ["MissileBase", 25];
-		
-		/*
-		//Prvents cruise missiles for seeing themselves
-		if(_isCruiseMissile) then {
-			_entities = _entities select {!(_x isKindOf "ammo_Missile_CruiseBase")};
-		};
-		*/
+
+        _entities = _entities select {!(_x getVariable ["isMissile", false])};
 	
 		//Boom
 		if(count _entities > 0) then {

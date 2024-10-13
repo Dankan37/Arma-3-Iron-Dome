@@ -1,3 +1,5 @@
+if(!isServer) exitWith {};
+
 //params ["_missile", "_target", "_speed",];
 private _missile 	= param[0];
 private _target 	= param[1];
@@ -43,11 +45,12 @@ if(_skipSpeed) then {
 	_currSpeed = _speed;
 };
 
+
 //Weird issue with APN when engaging missiles idk 
 private _targetIsMissile = (_target isKindOf "MissileBase");
 
 //Variables for the missile and logic
-private _increment = 0.044;
+private _increment = 0.045;
 private _k = 1;
 private _initialDist = (_missile distance _target);
 private _closeEncounter = false;
@@ -72,7 +75,7 @@ private _time = time;
 _loop = 0;
 
 //STORE SCRIPT STATUS
-_missile setVariable ["guidance", true];
+_missile setVariable ["guidance", true, true];
 
 //EXIT SCRIPT
 private _guidanceEnabled = true;
@@ -130,7 +133,7 @@ while {alive _target} do {
 			_losZEM = _ZEM vectorDotProduct _steering;
 			_nrmZEM = (_ZEM vectorDiff (_steering vectorMultiply _losZEM));
 
-			//Weird behaviour when attacking missiles
+			//Weird behaviour when attacking missiles (something like infinite acceleration)
 			if(!_targetIsMissile) then {
 				if(_loop == _medianLoops) then {
 				//Target accelleration 

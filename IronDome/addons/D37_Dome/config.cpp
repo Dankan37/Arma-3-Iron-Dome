@@ -1,4 +1,3 @@
-#include "BIS_AddonInfo.hpp"
 class cfgPatches 
 {
     class D37_dome
@@ -25,6 +24,7 @@ class CfgFunctions
             class pickTarget {};
             class handleTargets {};
 			class handleMissile {};
+			class initMissile {};
 			class postInitEH {postInit	= 1;};
         };
 	};
@@ -92,7 +92,7 @@ class cfgVehicles {
 		driverCanSee = "";
         class EventHandlers: EventHandlers {
 			class DOME37 {
-				init = "[_this select 0, 3000, 1, [450/3.6, 0, 4, false, 9, 1]] spawn IRON_DOME37_fnc_handleDome;";
+				init = "[_this select 0, 3500, 1, [430/3.6, 0, 4, false, 9, 0.85]] spawn IRON_DOME37_fnc_handleDome;";
 			};
 		};
 
@@ -107,13 +107,34 @@ class cfgVehicles {
         };
     };
 
+	class B_SAM_System_01_F_DOME_2: B_SAM_System_01_F {
+        displayName = "Iron Dome (42 missiles)";
+		commanderCanSee = "";
+		driverCanSee = "";
+        class EventHandlers: EventHandlers {
+			class DOME37 {
+				init = "[_this select 0, 3500, 1, [430/3.6, 0, 4, false, 9, 0.85]] spawn IRON_DOME37_fnc_handleDome;";
+			};
+		};
+
+        class Turrets: Turrets {
+            class MainTurret: MainTurret {
+                initElev = 89;
+                maxelev = 90;
+                minelev = 89;
+
+				magazines[] = {"magazine_Missile_dome_x42"};
+            };
+        };
+    };
+
 	class SAM_System_03_base_F:StaticMGWeapon {
 		class EventHandlers;
 	};
 	class B_SAM_System_03_F: SAM_System_03_base_F {
 		class EventHandlers: EventHandlers {
 			class DOME37 {
-				init = "[_this select 0, 9600, 1, [1100/3.6, 0, 4, true, 30, 3]] spawn IRON_DOME37_fnc_handleDome;";
+				init = "[_this select 0, 9600, 1, [1100/3.6, 0, 4, true, 30, 4]] spawn IRON_DOME37_fnc_handleDome;";
 			};
 		};
 	};
@@ -124,7 +145,7 @@ class cfgVehicles {
 	class O_SAM_System_04_F: SAM_System_04_base_F {
 		class EventHandlers: EventHandlers {
 			class DOME37 {
-				init = "[_this select 0, 9600, 1, [1100/3.6, 0, 4, true, 30, 3]] spawn IRON_DOME37_fnc_handleDome;";
+				init = "[_this select 0, 9600, 1, [1100/3.6, 0, 4, true, 30, 4]] spawn IRON_DOME37_fnc_handleDome;";
 			};
 		};
 	};
@@ -135,7 +156,7 @@ class cfgVehicles {
 	class B_SAM_System_02_F: SAM_System_02_base_F {
 		class EventHandlers: EventHandlers {
 			class DOME37 {
-				init = "[_this select 0, 8000, 1, [800/3.6, 0, 3, true, 15, 4]] spawn IRON_DOME37_fnc_handleDome;";
+				init = "[_this select 0, 7000, 1, [800/3.6, 0, 3, true, 15, 3]] spawn IRON_DOME37_fnc_handleDome;";
 			};
 		};
 	};
@@ -144,16 +165,37 @@ class cfgVehicles {
 //["ammo_Missile_ShortRangeAABase","MissileBase","MissileCore","Default"]
 class cfgAmmo {
 	class MissileCore;
-	class MissileBase: MissileCore {};
+	class MissileBase: MissileCore {
+		class EventHandlers;
+	};
 	class ammo_Missile_ShortRangeAABase: MissileBase {};
 	class ammo_Missile_rim116: ammo_Missile_ShortRangeAABase {};
-
 	class ammo_Missile_dome: ammo_Missile_rim116 {
 		thrust = 10;
 		thrustTime = 34;
 		timeToLive = 34;
 	};
+
+	class ammo_Missile_AntiRadiationBase: MissileBase {
+		class EventHandlers:EventHandlers {
+			class D37_Dome {
+				init = "_this call IRON_DOME37_fnc_initMissile";
+			};
+		};
+	};
+
+	class ammo_Missile_CruiseBase: MissileBase {
+		class EventHandlers:EventHandlers {
+			class D37_Dome {
+				init = "_this call IRON_DOME37_fnc_initMissile";
+			};
+		};
+	};
 };
+
+//"ammo_Missile_Cruise_01","ammo_Missile_CruiseBase","MissileBase","MissileCore","Default"]
+//["ammo_Missile_AntiRadiationBase","MissileBase","MissileCore","Default"]
+//ammo_Missile_AntiRadiationBase ammo_Missile_CruiseBase
 
 //["VehicleMagazine","CA_Magazine","Default"]
 class cfgMagazines {
@@ -164,6 +206,11 @@ class cfgMagazines {
 	class magazine_Missile_dome_x21: magazine_Missile_rim116_x21 {
 		ammo = "ammo_Missile_dome";
 	};	
+
+	class magazine_Missile_dome_x42: magazine_Missile_rim116_x21 {
+		ammo = "ammo_Missile_dome";
+		count = 42;
+	};	
 };
 
 class cfgWeapons {
@@ -171,7 +218,7 @@ class cfgWeapons {
 	class MissileLauncher: LauncherCore {};
 	class weapon_rim116Launcher: MissileLauncher {
 		reloadTime = 0.75;
-		magazines[] += {"magazine_Missile_dome_x21"};
+		magazines[] += {"magazine_Missile_dome_x21", "magazine_Missile_dome_x42"};
 	};
 };
 
